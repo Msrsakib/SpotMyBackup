@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Porter - Full Suite (Tracks, Playlists & Artists)</title>
+    <title>Spotify Porter - Full Suite</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
         .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 90%; max-width: 550px; }
@@ -18,10 +18,10 @@
 
 <div class="card">
     <h1 style="color: #1DB954; margin-bottom: 5px;">Spotify Porter</h1>
-    <p style="color: #888;">Backup: Songs, Playlists & Followed Artists</p>
+    <p style="color: #888;">Backup: Songs, Playlists & Artists</p>
     
     <div id="login-section">
-        <button class="btn" onclick="redirectToSpotify()">Connect with Spotify</button>
+        <button id="connectBtn" class="btn">Connect with Spotify</button>
     </div>
 
     <div id="action-section" style="display:none;">
@@ -38,52 +38,69 @@
 </div>
 
 <script>
-    const clientId = '10894b5f6e264203ac55e860682458a4'; // আপনার Client ID এখানে দিন
+    // গুরুত্বপূর্ণ: আপনার Client ID এখানে নিখুঁতভাবে বসান
+    const clientId = '10894b5f6e264203ac55e860682458a4'; 
     const redirectUri = window.location.origin + window.location.pathname;
     let accessToken = '';
 
-    // --- 1. PKCE AUTH (Stable) ---
+    // --- ক্লিক হ্যান্ডলার ---
+    document.getElementById('connectBtn').addEventListener('click', () => {
+        redirectToSpotify();
+    });
+
+    // --- AUTH LOGIC ---
     async function redirectToSpotify() {
         const verifier = generateRandomString(64);
         window.localStorage.setItem('code_verifier', verifier);
         const challenge = await generateCodeChallenge(verifier);
+        
         const params = new URLSearchParams({
-            client_id: clientId, response_type: 'code', redirect_uri: redirectUri,
-            code_challenge_method: 'S256', code_challenge: challenge,
+            client_id: clientId,
+            response_type: 'code',
+            redirect_uri: redirectUri,
+            code_challenge_method: 'S256',
+            code_challenge: challenge,
             scope: 'playlist-read-private playlist-modify-public playlist-modify-private user-library-read user-library-modify user-follow-read user-follow-modify'
         });
-        window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+
+        window.location.href = 'https://accounts.spotify.com/authorize?' + params.toString();
     }
 
     async function fetchToken(code) {
+        const codeVerifier = window.localStorage.getItem('code_verifier');
         const params = new URLSearchParams({
-            client_id: clientId, grant_type: 'authorization_code', code: code,
-            redirect_uri: redirectUri, code_verifier: window.localStorage.getItem('code_verifier')
+            client_id: clientId,
+            grant_type: 'authorization_code',
+            code: code,
+            redirect_uri: redirectUri,
+            code_verifier: codeVerifier
         });
+
         const res = await fetch('https://accounts.spotify.com/api/token', {
-            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params
         });
         const data = await res.json();
         return data.access_token;
     }
 
-    // --- 2. EXPORT LOGIC (Includes Artists) ---
+    // --- EXPORT ---
     async function exportData() {
         try {
             updateStatus("Export starting...");
             let collections = { saved: [], playlists: {}, followedArtists: [] };
 
-            // A. Followed Artists
+            // Artists
             updateStatus("Fetching Followed Artists...");
-            let artistUrl = 'https://api.spotify.com/v1/me/following?type=artist&limit=50';
+            let artistUrl = 'https://api.spotify.com/v1/me/following?type=artist';
             while(artistUrl) {
                 const aRes = await fetch(artistUrl, { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
                 aRes.artists.items.forEach(a => collections.followedArtists.push(a.id));
                 artistUrl = aRes.artists.next;
             }
-            updateStatus(`Found ${collections.followedArtists.length} Artists.`);
 
-            // B. Liked Songs
+            // Songs
             let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
             while(url) {
                 const res = await fetch(url, { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
@@ -92,7 +109,7 @@
                 updateStatus(`Fetched ${collections.saved.length} Liked Songs...`);
             }
 
-            // C. Playlists
+            // Playlists
             const plRes = await fetch('https://api.spotify.com/v1/me/playlists', { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
             for (let pl of plRes.items) {
                 updateStatus(`Reading Playlist: ${pl.name}`);
@@ -115,20 +132,19 @@
         } catch (e) { updateStatus("Export Error: " + e.message); }
     }
 
-    // --- 3. IMPORT LOGIC (With Delay & Artist Follow) ---
+    // --- IMPORT ---
     async function importData(event) {
         const file = event.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = async (e) => {
             try {
                 const data = JSON.parse(e.target.result);
                 updateStatus("Restoring account data...");
 
-                // A. Follow Artists
-                if (data.followedArtists && data.followedArtists.length > 0) {
-                    updateStatus(`Following ${data.followedArtists.length} Artists...`);
+                // Artists
+                if (data.followedArtists) {
+                    updateStatus(`Following Artists...`);
                     for (let i = 0; i < data.followedArtists.length; i += 50) {
                         const ids = data.followedArtists.slice(i, i+50).join(',');
                         await fetch(`https://api.spotify.com/v1/me/following?type=artist&ids=${ids}`, {
@@ -138,9 +154,8 @@
                     }
                 }
 
-                // B. Restore Liked Songs
+                // Songs
                 if (data.saved) {
-                    updateStatus(`Restoring Liked Songs...`);
                     for (let i = 0; i < data.saved.length; i += 50) {
                         const ids = data.saved.slice(i, i+50).map(t => t.id).join(',');
                         await fetch(`https://api.spotify.com/v1/me/tracks?ids=${ids}`, {
@@ -151,7 +166,7 @@
                     }
                 }
 
-                // C. Restore Playlists
+                // Playlists
                 const me = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
                 for (let name in data.playlists) {
                     updateStatus(`Creating Playlist: ${name}`);
@@ -170,21 +185,20 @@
                         await new Promise(r => setTimeout(r, 1000));
                     }
                 }
-                updateStatus("SUCCESS: All Artists, Songs & Playlists restored!");
-                alert("Restoration Complete!");
+                updateStatus("SUCCESS: Restoration Complete!");
             } catch (err) { updateStatus("Import Error: " + err.message); }
         };
         reader.readAsText(file);
     }
 
-    // --- HELPER FUNCTIONS ---
     function updateStatus(msg) { document.getElementById('status-text').innerText = msg; }
     function updateProgress(curr, total) { document.getElementById('progress-bar').style.width = (curr/total)*100 + '%'; }
     
+    // --- হ্যান্ডলিং রিডাইরেক্ট ---
     const code = new URLSearchParams(window.location.search).get('code');
     if (code) {
         fetchToken(code).then(token => {
-            accessToken = token;
-            window.history.replaceState({}, '', window.location.pathname);
-            document.getElementById('login-section').style.display = 'none';
-            document.getElementById('action-section').style.display = 'block';
+            if (token) {
+                accessToken = token;
+                window.history.replaceState({}, '', window.location.pathname);
+                document.getElementById('login-section').style

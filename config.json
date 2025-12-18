@@ -1,7 +1,7 @@
 config = {
-"uri":"https://Msrsakib.github.io/SpotMyBackup",
-"redirect_uri":"https://Msrsakib.github.io/SpotMyBackup/login.html",
-"client_id":"10894b5f6e264203ac55e860682458a4",
+"uri":"https://msrsakib.github.io/SpotMyBackup",
+"redirect_uri":"https://msrsakib.github.io/SpotMyBackup/login.html",
+"client_id":"8ec0c2ac550a47f997486732d12fd702",
 "slowdown_import": 100,
 "slowdown_export": 100
 };

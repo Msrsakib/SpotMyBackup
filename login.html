@@ -1,26 +1,34 @@
 <!DOCTYPE html>
 <html>
-	<head>
-		<meta http-equiv="content-type" content="text/html; charset=UTF-8">
-		<title>Login Window</title>
-                <script type="text/javascript" src="config.json"></script>
-		<script type='text/javascript'>//<![CDATA[ 
-
-			var conf = config;
-
-			window.onload = function() {
-				var target = window.self === window.top ? window.opener : window.parent;
-				var hash = window.location.hash;
-				if (hash) {
-				    var token = window.location.hash.split('&')[0].split('=')[1];
-				    target.postMessage(token, conf.uri); //embedded
-				}
-			}
-		</script>
-	</head>
-	<body>
-	  
-	</body>
+<head>
+    <meta charset="UTF-8">
+    <title>Logging in...</title>
+</head>
+<body>
+    <script>
+        // Extracting access token from the URL hash
+        const hash = window.location.hash;
+        if (hash) {
+            const params = new URLSearchParams(hash.substring(1));
+            const token = params.get('access_token');
+            
+            if (token) {
+                // Sending the token back to the main window (index.html)
+                window.opener.postMessage(token, window.location.origin);
+                window.close();
+            } else {
+                console.error('Access token not found');
+            }
+        } else {
+            // Check for errors in the search query
+            const error = new URLSearchParams(window.location.search).get('error');
+            if (error) {
+                alert('Authentication Error: ' + error);
+            }
+        }
+    </script>
+    <div style="text-align: center; font-family: Arial, sans-serif; margin-top: 50px;">
+        <p>Finalizing authentication, please wait...</p>
+    </div>
+</body>
 </html>
-
-

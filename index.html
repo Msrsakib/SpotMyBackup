@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Porter - Final Fix</title>
+    <title>Spotify Library Porter - Stable Build</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
         .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 600px; width: 90%; }
@@ -11,7 +11,7 @@
         .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; margin: 10px; transition: 0.3s; width: 250px; }
         .btn:hover { background: #1ed760; transform: scale(1.02); }
         .btn-secondary { background: #333; }
-        #status { margin-top: 20px; color: #b3b3b3; white-space: pre-wrap; line-height: 1.6; font-size: 14px; }
+        #status { margin-top: 20px; color: #b3b3b3; white-space: pre-wrap; font-size: 14px; }
         input[type="file"] { display: none; }
     </style>
 </head>
@@ -36,9 +36,8 @@
 </div>
 
 <script>
-    const clientId = '10894b5f6e264203ac55e860682458a4'; // নিশ্চিত করুন আপনার Client ID এখানে আছে
+    const clientId = '10894b5f6e264203ac55e860682458a4'; // Replace with your ID
     const redirectUri = window.location.origin + window.location.pathname;
-    const scope = 'playlist-read-private playlist-modify-public playlist-modify-private user-library-read user-library-modify';
 
     async function redirectToSpotify() {
         const verifier = generateRandomString(64);
@@ -46,7 +45,8 @@
         const challenge = await generateCodeChallenge(verifier);
         const params = new URLSearchParams({
             client_id: clientId, response_type: 'code', redirect_uri: redirectUri,
-            code_challenge_method: 'S256', code_challenge: challenge, scope: scope
+            code_challenge_method: 'S256', code_challenge: challenge,
+            scope: 'playlist-read-private playlist-modify-public playlist-modify-private user-library-read user-library-modify'
         });
         window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
     }
@@ -64,135 +64,102 @@
 
     async function exportFullLibrary() {
         try {
-            updateStatus("Initializing Export...");
+            updateStatus("Exporting... Please do not close this tab.");
             const token = window.localStorage.getItem('access_token');
-            let fullBackup = [];
+            let backup = [];
 
-            // 1. Liked Songs
-            let likedSongs = [];
-            let nextLiked = 'https://api.spotify.com/v1/me/tracks?limit=50';
-            while(nextLiked) {
-                const res = await fetch(nextLiked, { headers: {'Authorization': `Bearer ${token}`} });
+            // 1. Export Liked Songs
+            let liked = [];
+            let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
+            while(url) {
+                const res = await fetch(url, { headers: {'Authorization': `Bearer ${token}`} });
                 const data = await res.json();
-                likedSongs.push(...data.items.map(i => i.track.uri));
-                nextLiked = data.next;
-                updateStatus(`Fetched ${likedSongs.length} Liked Songs...`);
+                liked.push(...data.items.map(i => i.track.uri));
+                url = data.next;
+                updateStatus(`Fetched ${liked.length} Liked Songs...`);
             }
-            if (likedSongs.length > 0) fullBackup.push({ name: "Liked Songs Backup", tracks: likedSongs });
+            if(liked.length > 0) backup.push({ name: "My Liked Songs", tracks: liked, isLiked: true });
 
-            // 2. Playlists
-            const plRes = await fetch('https://api.spotify.com/v1/me/playlists?limit=50', { headers: {'Authorization': `Bearer ${token}`} });
+            // 2. Export Playlists
+            const plRes = await fetch('https://api.spotify.com/v1/me/playlists', { headers: {'Authorization': `Bearer ${token}`} });
             const plData = await plRes.json();
-
             for (let pl of plData.items) {
-                updateStatus(`Processing Playlist: ${pl.name}`);
+                updateStatus(`Fetching Playlist: ${pl.name}`);
                 let tracks = [];
-                let nextTracks = pl.tracks.href;
-                while(nextTracks) {
-                    const tRes = await fetch(nextTracks, { headers: {'Authorization': `Bearer ${token}`} });
+                let tUrl = pl.tracks.href;
+                while(tUrl) {
+                    const tRes = await fetch(tUrl, { headers: {'Authorization': `Bearer ${token}`} });
                     const tData = await tRes.json();
                     tracks.push(...tData.items.filter(i => i.track).map(i => i.track.uri));
-                    nextTracks = tData.next;
+                    tUrl = tData.next;
                 }
-                fullBackup.push({ name: pl.name, tracks: tracks });
+                backup.push({ name: pl.name, tracks: tracks, isLiked: false });
             }
 
-            const blob = new Blob([JSON.stringify(fullBackup, null, 2)], {type: 'application/json'});
+            const blob = new Blob([JSON.stringify(backup)], {type: 'application/json'});
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `Spotify_Backup_${new Date().toISOString().slice(0,10)}.json`;
+            a.download = `SpotifyBackup.json`;
             a.click();
-            updateStatus("Export Successful! File saved.");
-        } catch (err) {
-            updateStatus("Export Error: " + err.message);
-        }
+            updateStatus("Export Complete!");
+        } catch (e) { updateStatus("Error: " + e.message); }
     }
 
-    // --- FIX: IMPROVED IMPORT FUNCTION ---
     async function importLibrary(event) {
         const file = event.target.files[0];
         if (!file) return;
-        
-        updateStatus("Reading file...");
         const reader = new FileReader();
-        
         reader.onload = async (e) => {
             try {
-                const backupData = JSON.parse(e.target.result);
+                const data = JSON.parse(e.target.result);
                 const token = window.localStorage.getItem('access_token');
-                
-                // Fetch User ID
-                const meRes = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': `Bearer ${token}`} });
-                const user = await meRes.json();
-                
-                if (!user.id) throw new Error("Could not get user info.");
+                const me = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
 
-                for (let pl of backupData) {
-                    if (pl.name === "Liked Songs Backup") {
+                for (let item of data) {
+                    if (item.isLiked) {
                         updateStatus("Importing Liked Songs...");
-                        for (let i = 0; i < pl.tracks.length; i += 50) {
-                            const ids = pl.tracks.slice(i, i + 50).map(uri => uri.split(':')[2]);
+                        for (let i = 0; i < item.tracks.length; i += 50) {
+                            const ids = item.tracks.slice(i, i+50).map(u => u.split(':')[2]);
                             await fetch(`https://api.spotify.com/v1/me/tracks?ids=${ids.join(',')}`, {
                                 method: 'PUT', headers: {'Authorization': `Bearer ${token}`}
                             });
-                            updateStatus(`Importing Liked Songs: ${i + ids.length}/${pl.tracks.length}`);
                         }
                     } else {
-                        updateStatus(`Creating Playlist: ${pl.name}`);
-                        const createRes = await fetch(`https://api.spotify.com/v1/users/${user.id}/playlists`, {
-                            method: 'POST', 
-                            headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
-                            body: JSON.stringify({ name: pl.name, public: false })
-                        });
-                        const newPl = await createRes.json();
-                        
-                        if (newPl.id && pl.tracks && pl.tracks.length > 0) {
-                            for (let i = 0; i < pl.tracks.length; i += 100) {
-                                await fetch(`https://api.spotify.com/v1/playlists/${newPl.id}/tracks`, {
-                                    method: 'POST', 
-                                    headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
-                                    body: JSON.stringify({ uris: pl.tracks.slice(i, i + 100) })
-                                });
-                            }
+                        updateStatus(`Creating Playlist: ${item.name}`);
+                        const newPl = await fetch(`https://api.spotify.com/v1/users/${me.id}/playlists`, {
+                            method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
+                            body: JSON.stringify({ name: item.name })
+                        }).then(r => r.json());
+
+                        for (let i = 0; i < item.tracks.length; i += 100) {
+                            await fetch(`https://api.spotify.com/v1/playlists/${newPl.id}/tracks`, {
+                                method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
+                                body: JSON.stringify({ uris: item.tracks.slice(i, i+100) })
+                            });
                         }
                     }
-                    await new Promise(r => setTimeout(r, 500)); // Rate limit prevention
                 }
-                updateStatus("SUCCESS: All playlists and songs imported!");
-            } catch (err) {
-                console.error(err);
-                updateStatus("Import Error: " + err.message);
-            }
+                updateStatus("SUCCESS: Transfer Finished!");
+            } catch (err) { updateStatus("Invalid File: Please use a JSON file exported from this tool."); }
         };
         reader.readAsText(file);
     }
 
     function updateStatus(msg) { document.getElementById('status').innerText = "Status: " + msg; }
-    
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
+    const code = new URLSearchParams(window.location.search).get('code');
     if (code) {
-        getToken(code).then(data => {
-            if (data.access_token) {
-                window.localStorage.setItem('access_token', data.access_token);
-                window.history.replaceState({}, document.title, window.location.pathname);
-                document.getElementById('login-section').style.display = 'none';
-                document.getElementById('action-section').style.display = 'block';
-                updateStatus("Connected!");
-            }
-        }).catch(e => updateStatus("Auth Error: " + e.message));
+        getToken(code).then(d => {
+            window.localStorage.setItem('access_token', d.access_token);
+            window.history.replaceState({}, '', window.location.pathname);
+            document.getElementById('login-section').style.display = 'none';
+            document.getElementById('action-section').style.display = 'block';
+            updateStatus("Connected!");
+        });
     }
-
-    function generateRandomString(length) {
-        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        const values = crypto.getRandomValues(new Uint8Array(length));
-        return Array.from(values).map(x => possible[x % possible.length]).join('');
-    }
-
-    async function generateCodeChallenge(codeVerifier) {
-        const data = new TextEncoder().encode(codeVerifier);
-        const digest = await crypto.subtle.digest('SHA-256', data);
-        return btoa(String.fromCharCode.apply(null, new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    function generateRandomString(l) { return Array.from(crypto.getRandomValues(new Uint8Array(l))).map(x => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'[x % 62]).join(''); }
+    async function generateCodeChallenge(v) {
+        const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
+        return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
 </script>
 </body>

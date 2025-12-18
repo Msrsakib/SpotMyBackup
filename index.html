@@ -3,40 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Porter - Ultimate Fix</title>
+    <title>Spotify Library Porter - Text Edition</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
-        .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 600px; width: 90%; }
-        h1 { color: #1DB954; }
-        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; margin: 10px; transition: 0.3s; width: 250px; }
-        .btn:hover { background: #1ed760; transform: scale(1.02); }
-        #status { margin-top: 20px; color: #b3b3b3; white-space: pre-wrap; font-size: 14px; background: #222; padding: 10px; border-radius: 10px; }
-        input[type="file"] { display: none; }
+        .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 90%; max-width: 500px; }
+        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; margin: 10px; width: 80%; }
+        #status { margin-top: 20px; color: #b3b3b3; font-size: 14px; background: #222; padding: 15px; border-radius: 10px; min-height: 40px; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h1>Spotify Porter</h1>
-    <p>Complete Library Backup & Restore</p>
+    <h1 style="color: #1DB954;">Spotify Porter</h1>
+    <p>Using Secure Text Format for reliability.</p>
     
     <div id="login-section">
-        <button class="btn" onclick="redirectToSpotify()">Connect Spotify</button>
+        <button class="btn" onclick="redirectToSpotify()">Login to Spotify</button>
     </div>
 
     <div id="action-section" style="display:none;">
-        <button class="btn" onclick="exportFullLibrary()">1. Download Backup</button>
+        <button class="btn" onclick="exportData()">1. Download Backup (.txt)</button>
         <br>
-        <input type="file" id="importFile" accept=".json" onclick="this.value=null" onchange="importLibrary(event)">
-        <button class="btn" style="background:#333" onclick="document.getElementById('importFile').click()">2. Upload & Restore</button>
+        <input type="file" id="importFile" accept=".txt" style="display:none" onchange="importData(event)">
+        <button class="btn" style="background:#444" onclick="document.getElementById('importFile').click()">2. Upload & Import (.txt)</button>
     </div>
 
-    <div id="status">Status: Waiting...</div>
+    <div id="status">Status: Waiting for login...</div>
 </div>
 
 <script>
-    // --- Configuration ---
-    const clientId = '10894b5f6e264203ac55e860682458a4'; 
+    const clientId = '10894b5f6e264203ac55e860682458a4'; // Replace with your actual Client ID
     const redirectUri = window.location.origin + window.location.pathname;
 
     async function redirectToSpotify() {
@@ -62,67 +58,59 @@
         return await res.json();
     }
 
-    // --- Export Logic ---
-    async function exportFullLibrary() {
+    // --- NEW EXPORT AS BASE64 TEXT ---
+    async function exportData() {
         try {
-            updateStatus("Export started... Please wait.");
+            updateStatus("Exporting... Please wait.");
             const token = window.localStorage.getItem('access_token');
             let backup = [];
 
-            // Liked Songs
-            let liked = [];
+            // Fetch Liked Songs
             let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
             while(url) {
                 const res = await fetch(url, { headers: {'Authorization': `Bearer ${token}`} });
                 const data = await res.json();
-                liked.push(...data.items.map(i => i.track.uri));
+                backup.push({ name: "Liked Songs", tracks: data.items.map(i => i.track.uri), type: 'liked' });
                 url = data.next;
-                updateStatus(`Fetched ${liked.length} Liked Songs`);
             }
-            if(liked.length > 0) backup.push({ name: "Liked Songs", tracks: liked, type: 'liked' });
 
-            // Playlists
+            // Fetch Playlists
             const plRes = await fetch('https://api.spotify.com/v1/me/playlists', { headers: {'Authorization': `Bearer ${token}`} });
             const plData = await plRes.json();
             for (let pl of plData.items) {
-                updateStatus(`Fetching: ${pl.name}`);
-                let tracks = [];
                 let tUrl = pl.tracks.href;
+                let tracks = [];
                 while(tUrl) {
-                    const tRes = await fetch(tUrl, { headers: {'Authorization': `Bearer ${token}`} });
-                    const tData = await tRes.json();
+                    const tData = await fetch(tUrl, { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
                     tracks.push(...tData.items.filter(i => i.track).map(i => i.track.uri));
                     tUrl = tData.next;
                 }
                 backup.push({ name: pl.name, tracks: tracks, type: 'playlist' });
             }
 
-            const blob = new Blob([JSON.stringify(backup)], {type: 'application/json'});
+            // Convert to Base64 to prevent JSON errors
+            const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(backup))));
+            const blob = new Blob([encodedData], {type: 'text/plain'});
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `Spotify_Backup.json`;
+            a.download = `Spotify_Porter_Backup.txt`;
             a.click();
-            updateStatus("Export Complete! File downloaded.");
+            updateStatus("Backup Complete! .txt file downloaded.");
         } catch (e) { updateStatus("Export Error: " + e.message); }
     }
 
-    // --- Import Logic (Improved Fix) ---
-    async function importLibrary(event) {
+    // --- NEW IMPORT FROM TEXT ---
+    async function importData(event) {
         const file = event.target.files[0];
         if (!file) return;
-        
-        updateStatus("Reading file: " + file.name);
         const reader = new FileReader();
-        
         reader.onload = async (e) => {
             try {
-                const rawData = e.target.result;
-                const data = JSON.parse(rawData);
+                updateStatus("Processing file...");
+                const decodedData = decodeURIComponent(escape(atob(e.target.result)));
+                const data = JSON.parse(decodedData);
                 const token = window.localStorage.getItem('access_token');
-                
-                // Get User Info
                 const me = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
-                if (!me.id) throw new Error("Connection lost. Please login again.");
 
                 for (let item of data) {
                     if (item.type === 'liked') {
@@ -147,34 +135,24 @@
                             });
                         }
                     }
-                    await new Promise(r => setTimeout(r, 600)); // Delay for stability
                 }
-                updateStatus("SUCCESS! Library Restored.");
-                alert("Import Finished!");
-            } catch (err) { 
-                console.error(err);
-                updateStatus("Import Error: " + err.message);
-                alert("Error during import. Check status.");
-            }
+                updateStatus("SUCCESS: All Data Restored!");
+            } catch (err) { updateStatus("Import Error: Invalid file format."); }
         };
         reader.readAsText(file);
     }
 
-    function updateStatus(msg) { document.getElementById('status').innerText = "Status: " + msg; }
-    
+    function updateStatus(msg) { document.getElementById('status').innerText = msg; }
     const code = new URLSearchParams(window.location.search).get('code');
     if (code) {
         getToken(code).then(d => {
-            if(d.access_token) {
-                window.localStorage.setItem('access_token', d.access_token);
-                window.history.replaceState({}, '', window.location.pathname);
-                document.getElementById('login-section').style.display = 'none';
-                document.getElementById('action-section').style.display = 'block';
-                updateStatus("Connected!");
-            }
+            window.localStorage.setItem('access_token', d.access_token);
+            window.history.replaceState({}, '', window.location.pathname);
+            document.getElementById('login-section').style.display = 'none';
+            document.getElementById('action-section').style.display = 'block';
+            updateStatus("Connected!");
         });
     }
-
     function generateRandomString(l) { return Array.from(crypto.getRandomValues(new Uint8Array(l))).map(x => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'[x % 62]).join(''); }
     async function generateCodeChallenge(v) {
         const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));

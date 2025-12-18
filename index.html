@@ -2,78 +2,77 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Spotify Porter - Full Suite</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
-        .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 90%; max-width: 550px; }
-        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; margin: 10px; width: 85%; font-size: 16px; transition: 0.3s; }
-        .btn:hover { background: #1ed760; transform: scale(1.02); }
-        #status-box { margin-top: 20px; color: #b3b3b3; font-size: 14px; background: #222; padding: 20px; border-radius: 12px; border: 1px solid #333; text-align: left; min-height: 80px; }
-        .progress-container { width: 100%; background: #444; border-radius: 10px; margin-top: 10px; height: 8px; overflow: hidden; }
-        .progress-bar { width: 0%; height: 100%; background: #1DB954; transition: 0.5s; }
+        body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
+        .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; width: 90%; max-width: 500px; border: 1px solid #333; }
+        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; width: 100%; margin: 10px 0; font-size: 16px; }
+        #status { margin-top: 20px; color: #b3b3b3; font-size: 14px; background: #222; padding: 15px; border-radius: 10px; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h1 style="color: #1DB954; margin-bottom: 5px;">Spotify Porter</h1>
-    <p style="color: #888;">Backup: Songs, Playlists & Artists</p>
+    <h1 style="color: #1DB954;">Spotify Porter</h1>
+    <p>Backup Tracks, Playlists & Artists</p>
     
     <div id="login-section">
-        <button id="connectBtn" class="btn">Connect with Spotify</button>
+        <button id="connectBtn" class="btn" onclick="startLogin()">Connect with Spotify</button>
     </div>
 
     <div id="action-section" style="display:none;">
-        <button class="btn" onclick="exportData()">1. Download Full Backup</button>
-        <br>
+        <button class="btn" onclick="exportData()">Download Backup</button>
         <input type="file" id="fileInput" accept=".json" style="display:none" onchange="importData(event)">
-        <button class="btn" style="background:#333" onclick="document.getElementById('fileInput').click()">2. Upload & Restore Everything</button>
+        <button class="btn" style="background:#444" onclick="document.getElementById('fileInput').click()">Restore Everything</button>
     </div>
 
-    <div id="status-box">
-        <div id="status-text">Status: Waiting for connection...</div>
-        <div class="progress-container"><div id="progress-bar" class="progress-bar"></div></div>
-    </div>
+    <div id="status">Status: Ready to connect</div>
 </div>
 
 <script>
-    // গুরুত্বপূর্ণ: আপনার Client ID এখানে নিখুঁতভাবে বসান
+    // আপনার অরিজিনাল Client ID এখানে দিন
     const clientId = '10894b5f6e264203ac55e860682458a4'; 
     const redirectUri = window.location.origin + window.location.pathname;
     let accessToken = '';
 
-    // --- ক্লিক হ্যান্ডলার ---
-    document.getElementById('connectBtn').addEventListener('click', () => {
-        redirectToSpotify();
-    });
+    // ১. লগইন ফাংশন (সহজ এবং সরাসরি)
+    async function startLogin() {
+        console.log("Login button clicked"); // চেক করার জন্য
+        try {
+            const verifier = generateRandomString(64);
+            window.localStorage.setItem('code_verifier', verifier);
+            const challenge = await generateCodeChallenge(verifier);
+            
+            const scope = 'playlist-read-private playlist-modify-public playlist-modify-private user-library-read user-library-modify user-follow-read user-follow-modify';
+            
+            const authUrl = new URL("https://accounts.spotify.com/authorize");
+            const params = {
+                client_id: clientId,
+                response_type: 'code',
+                redirect_uri: redirectUri,
+                code_challenge_method: 'S256',
+                code_challenge: challenge,
+                scope: scope
+            };
 
-    // --- AUTH LOGIC ---
-    async function redirectToSpotify() {
-        const verifier = generateRandomString(64);
-        window.localStorage.setItem('code_verifier', verifier);
-        const challenge = await generateCodeChallenge(verifier);
-        
-        const params = new URLSearchParams({
-            client_id: clientId,
-            response_type: 'code',
-            redirect_uri: redirectUri,
-            code_challenge_method: 'S256',
-            code_challenge: challenge,
-            scope: 'playlist-read-private playlist-modify-public playlist-modify-private user-library-read user-library-modify user-follow-read user-follow-modify'
-        });
-
-        window.location.href = 'https://accounts.spotify.com/authorize?' + params.toString();
+            authUrl.search = new URLSearchParams(params).toString();
+            console.log("Redirecting to:", authUrl.toString());
+            window.location.href = authUrl.toString();
+        } catch (error) {
+            alert("Error: " + error.message);
+            console.error(error);
+        }
     }
 
+    // ২. টোকেন আনা
     async function fetchToken(code) {
-        const codeVerifier = window.localStorage.getItem('code_verifier');
+        const verifier = window.localStorage.getItem('code_verifier');
         const params = new URLSearchParams({
             client_id: clientId,
             grant_type: 'authorization_code',
             code: code,
             redirect_uri: redirectUri,
-            code_verifier: codeVerifier
+            code_verifier: verifier
         });
 
         const res = await fetch('https://accounts.spotify.com/api/token', {
@@ -81,124 +80,57 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params
         });
-        const data = await res.json();
-        return data.access_token;
+        return await res.json();
     }
 
-    // --- EXPORT ---
+    // ৩. এক্সপোর্ট (আর্টিস্টসহ)
     async function exportData() {
+        updateStatus("Starting Export...");
+        let collections = { saved: [], playlists: {}, followedArtists: [] };
         try {
-            updateStatus("Export starting...");
-            let collections = { saved: [], playlists: {}, followedArtists: [] };
-
             // Artists
-            updateStatus("Fetching Followed Artists...");
-            let artistUrl = 'https://api.spotify.com/v1/me/following?type=artist';
-            while(artistUrl) {
-                const aRes = await fetch(artistUrl, { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
-                aRes.artists.items.forEach(a => collections.followedArtists.push(a.id));
-                artistUrl = aRes.artists.next;
-            }
+            const aRes = await fetch('https://api.spotify.com/v1/me/following?type=artist', { headers: {'Authorization': 'Bearer ' + accessToken} }).then(r => r.json());
+            if(aRes.artists) aRes.artists.items.forEach(a => collections.followedArtists.push(a.id));
 
-            // Songs
-            let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
-            while(url) {
-                const res = await fetch(url, { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
-                res.items.forEach(i => collections.saved.push({ id: i.track.id, uri: i.track.uri }));
-                url = res.next;
-                updateStatus(`Fetched ${collections.saved.length} Liked Songs...`);
-            }
+            // Tracks
+            let trackRes = await fetch('https://api.spotify.com/v1/me/tracks', { headers: {'Authorization': 'Bearer ' + accessToken} }).then(r => r.json());
+            trackRes.items.forEach(i => collections.saved.push({ id: i.track.id, uri: i.track.uri }));
 
-            // Playlists
-            const plRes = await fetch('https://api.spotify.com/v1/me/playlists', { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
-            for (let pl of plRes.items) {
-                updateStatus(`Reading Playlist: ${pl.name}`);
-                let tracks = [];
-                let tUrl = pl.tracks.href;
-                while(tUrl) {
-                    const tData = await fetch(tUrl, { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
-                    tData.items.forEach(i => { if(i.track) tracks.push({ id: i.track.id, uri: i.track.uri }); });
-                    tUrl = tData.next;
-                }
-                collections.playlists[pl.name] = { name: pl.name, tracks: tracks };
-            }
-
+            // Download
             const blob = new Blob([JSON.stringify(collections)], {type: 'application/json'});
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `Spotify_Master_Backup.json`;
+            a.download = `Spotify_Backup.json`;
             a.click();
-            updateStatus("Full Export Complete!");
-        } catch (e) { updateStatus("Export Error: " + e.message); }
+            updateStatus("Export Finished!");
+        } catch (e) { alert("Export Error: " + e.message); }
     }
 
-    // --- IMPORT ---
-    async function importData(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                const data = JSON.parse(e.target.result);
-                updateStatus("Restoring account data...");
+    // --- রিডাইরেক্ট হ্যান্ডলিং ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
 
-                // Artists
-                if (data.followedArtists) {
-                    updateStatus(`Following Artists...`);
-                    for (let i = 0; i < data.followedArtists.length; i += 50) {
-                        const ids = data.followedArtists.slice(i, i+50).join(',');
-                        await fetch(`https://api.spotify.com/v1/me/following?type=artist&ids=${ids}`, {
-                            method: 'PUT', headers: {'Authorization': `Bearer ${accessToken}`}
-                        });
-                        await new Promise(r => setTimeout(r, 1000));
-                    }
-                }
-
-                // Songs
-                if (data.saved) {
-                    for (let i = 0; i < data.saved.length; i += 50) {
-                        const ids = data.saved.slice(i, i+50).map(t => t.id).join(',');
-                        await fetch(`https://api.spotify.com/v1/me/tracks?ids=${ids}`, {
-                            method: 'PUT', headers: {'Authorization': `Bearer ${accessToken}`}
-                        });
-                        updateProgress(i, data.saved.length);
-                        await new Promise(r => setTimeout(r, 800));
-                    }
-                }
-
-                // Playlists
-                const me = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': `Bearer ${accessToken}`} }).then(r => r.json());
-                for (let name in data.playlists) {
-                    updateStatus(`Creating Playlist: ${name}`);
-                    const newPl = await fetch(`https://api.spotify.com/v1/users/${me.id}/playlists`, {
-                        method: 'POST', headers: {'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json'},
-                        body: JSON.stringify({ name: name })
-                    }).then(r => r.json());
-
-                    const tracks = data.playlists[name].tracks;
-                    for (let j = 0; j < tracks.length; j += 100) {
-                        const uris = tracks.slice(j, j+100).map(t => t.uri);
-                        await fetch(`https://api.spotify.com/v1/playlists/${newPl.id}/tracks`, {
-                            method: 'POST', headers: {'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json'},
-                            body: JSON.stringify({ uris: uris })
-                        });
-                        await new Promise(r => setTimeout(r, 1000));
-                    }
-                }
-                updateStatus("SUCCESS: Restoration Complete!");
-            } catch (err) { updateStatus("Import Error: " + err.message); }
-        };
-        reader.readAsText(file);
-    }
-
-    function updateStatus(msg) { document.getElementById('status-text').innerText = msg; }
-    function updateProgress(curr, total) { document.getElementById('progress-bar').style.width = (curr/total)*100 + '%'; }
-    
-    // --- হ্যান্ডলিং রিডাইরেক্ট ---
-    const code = new URLSearchParams(window.location.search).get('code');
     if (code) {
-        fetchToken(code).then(token => {
-            if (token) {
-                accessToken = token;
-                window.history.replaceState({}, '', window.location.pathname);
-                document.getElementById('login-section').style
+        fetchToken(code).then(data => {
+            if (data.access_token) {
+                accessToken = data.access_token;
+                window.history.replaceState({}, document.title, window.location.pathname);
+                document.getElementById('login-section').style.display = 'none';
+                document.getElementById('action-section').style.display = 'block';
+                updateStatus("Connected!");
+            } else {
+                updateStatus("Token Error: Check Client ID/Secret");
+            }
+        });
+    }
+
+    // হেল্পার ফাংশন
+    function updateStatus(msg) { document.getElementById('status').innerText = "Status: " + msg; }
+    function generateRandomString(l) { return Array.from(crypto.getRandomValues(new Uint8Array(l))).map(x => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'[x % 62]).join(''); }
+    async function generateCodeChallenge(v) {
+        const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
+        return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+</script>
+</body>
+</html>

@@ -3,43 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modern Spotify Playlist Transfer (PKCE)</title>
+    <title>Spotify Playlist Porter</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
-        .card { background: #181818; padding: 30px; border-radius: 15px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .btn { background: #1DB954; color: white; padding: 12px 25px; border: none; border-radius: 25px; cursor: pointer; font-weight: bold; margin: 10px; transition: 0.3s; }
-        .btn:hover { background: #1ed760; transform: scale(1.05); }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #FFFFFF; text-align: center; padding: 50px; }
+        .container { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; box-shadow: 0 8px 32px rgba(0,0,0,0.6); max-width: 500px; }
+        h1 { color: #1DB954; font-size: 2.5rem; margin-bottom: 10px; }
+        p { color: #b3b3b3; margin-bottom: 30px; }
+        .btn { background: #1DB954; color: white; padding: 14px 28px; border: none; border-radius: 30px; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.3s; margin: 10px; text-transform: uppercase; }
+        .btn:hover { background: #1ed760; transform: translateY(-2px); }
         .btn-secondary { background: #333; }
-        #status { margin-top: 20px; color: #b3b3b3; }
+        #status { margin-top: 25px; font-style: italic; color: #1DB954; }
+        input[type="file"] { display: none; }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <h1>Spotify Playlist Tool</h1>
-    <p>Backup & Restore Playlists (PKCE Standard)</p>
+<div class="container">
+    <h1>Spotify Porter</h1>
+    <p>Backup and restore your playlists seamlessly.</p>
     
     <div id="login-section">
-        <button class="btn" onclick="redirectToSpotify()">Connect Spotify</button>
+        <button class="btn" onclick="redirectToSpotify()">Connect with Spotify</button>
     </div>
 
     <div id="action-section" style="display:none;">
-        <button class="btn" onclick="exportPlaylists()">Export Playlists to JSON</button>
+        <button class="btn" onclick="exportPlaylists()">Step 1: Export Playlists</button>
         <br>
-        <input type="file" id="importFile" style="display:none" onchange="importPlaylists(event)">
-        <button class="btn btn-secondary" onclick="document.getElementById('importFile').click()">Import JSON to this Account</button>
+        <input type="file" id="importFile" onchange="importPlaylists(event)">
+        <button class="btn btn-secondary" onclick="document.getElementById('importFile').click()">Step 2: Import JSON File</button>
     </div>
 
-    <div id="status">Status: Waiting for login...</div>
+    <div id="status">Status: Authentication required</div>
 </div>
 
 <script>
-    // --- CONFIGURATION ---
-    const clientId = '10894b5f6e264203ac55e860682458a4'; // আপনার Client ID এখানে দিন
+    /* --- CONFIGURATION --- */
+    const clientId = '10894b5f6e264203ac55e860682458a4'; // Replace this with your Actual Client ID
     const redirectUri = window.location.origin + window.location.pathname;
     const scope = 'playlist-read-private playlist-modify-public playlist-modify-private';
 
-    // --- PKCE & AUTH LOGIC ---
+    /* --- AUTHENTICATION (PKCE) --- */
     async function redirectToSpotify() {
         const verifier = generateRandomString(64);
         window.localStorage.setItem('code_verifier', verifier);
@@ -75,21 +78,32 @@
         return await response.json();
     }
 
-    // --- EXPORT & IMPORT LOGIC ---
+    /* --- CORE FUNCTIONALITY: EXPORT & IMPORT --- */
     async function exportPlaylists() {
-        document.getElementById('status').innerText = "Fetching playlists...";
+        updateStatus("Fetching playlists and tracks...");
         const token = window.localStorage.getItem('access_token');
-        const res = await fetch('https://api.spotify.com/v1/me/playlists', {
+        
+        // Fetch User Playlists
+        const res = await fetch('https://api.spotify.com/v1/me/playlists?limit=50', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
         
-        const blob = new Blob([JSON.stringify(data.items, null, 2)], {type : 'application/json'});
+        // Deep fetch for tracks in each playlist
+        const fullData = await Promise.all(data.items.map(async (pl) => {
+            const trackRes = await fetch(`https://api.spotify.com/v1/playlists/${pl.id}/tracks`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const trackData = await trackRes.json();
+            return { name: pl.name, tracks: trackData.items.map(i => i.track.uri) };
+        }));
+
+        const blob = new Blob([JSON.stringify(fullData, null, 2)], {type : 'application/json'});
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'spotify_playlists_backup.json';
+        a.download = 'spotify_backup.json';
         a.click();
-        document.getElementById('status').innerText = "Backup downloaded!";
+        updateStatus("Backup downloaded successfully.");
     }
 
     async function importPlaylists(event) {
@@ -100,41 +114,66 @@
         reader.onload = async (e) => {
             const playlists = JSON.parse(e.target.result);
             const token = window.localStorage.getItem('access_token');
-            document.getElementById('status').innerText = "Importing... please wait.";
+            const userId = await getUserId(token);
 
             for (let pl of playlists) {
-                // Create new playlist
-                const createRes = await fetch(`https://api.spotify.com/v1/me/playlists`, {
+                updateStatus(`Creating: ${pl.name}`);
+                
+                // 1. Create empty playlist
+                const createRes = await fetch(`https://api.spotify.com/v1/users/${userId}/playlists`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: pl.name, public: false })
                 });
-                console.log(`Created: ${pl.name}`);
+                const newPl = await createRes.json();
+
+                // 2. Add tracks to the new playlist
+                if (newPl.id && pl.tracks.length > 0) {
+                    await fetch(`https://api.spotify.com/v1/playlists/${newPl.id}/tracks`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ uris: pl.tracks.slice(0, 100) })
+                    });
+                }
+                await new Promise(r => setTimeout(r, 300)); // Sleep to prevent rate limits
             }
-            document.getElementById('status').innerText = "Import complete!";
+            updateStatus("Transfer Complete!");
         };
         reader.readAsText(file);
     }
 
-    // --- INITIALIZE ---
+    /* --- HELPERS --- */
+    async function getUserId(token) {
+        const res = await fetch('https://api.spotify.com/v1/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        return data.id;
+    }
+
+    function updateStatus(msg) {
+        document.getElementById('status').innerText = "Status: " + msg;
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
 
     if (code) {
         getToken(code).then(data => {
-            window.localStorage.setItem('access_token', data.access_token);
-            window.history.replaceState({}, document.title, window.location.pathname);
-            document.getElementById('login-section').style.display = 'none';
-            document.getElementById('action-section').style.display = 'block';
-            document.getElementById('status').innerText = "Connected!";
+            if (data.access_token) {
+                window.localStorage.setItem('access_token', data.access_token);
+                window.history.replaceState({}, document.title, window.location.pathname);
+                document.getElementById('login-section').style.display = 'none';
+                document.getElementById('action-section').style.display = 'block';
+                updateStatus("Connected!");
+            }
         });
     }
 
-    // --- HELPERS ---
     function generateRandomString(length) {
         const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        return Array.from(crypto.getRandomValues(new Uint8Array(length)))
-            .map(x => possible[x % possible.length]).join('');
+        const values = crypto.getRandomValues(new Uint8Array(length));
+        return Array.from(values).map(x => possible[x % possible.length]).join('');
     }
 
     async function generateCodeChallenge(codeVerifier) {

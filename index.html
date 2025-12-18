@@ -3,38 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Library Porter - Text Edition</title>
+    <title>Spotify Porter - Final Import Fix</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
         .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 90%; max-width: 500px; }
-        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; margin: 10px; width: 80%; }
-        #status { margin-top: 20px; color: #b3b3b3; font-size: 14px; background: #222; padding: 15px; border-radius: 10px; min-height: 40px; }
+        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; margin: 10px; width: 85%; font-size: 16px; }
+        .btn:hover { background: #1ed760; transform: scale(1.02); }
+        #status { margin-top: 20px; color: #b3b3b3; font-size: 14px; background: #222; padding: 15px; border-radius: 10px; border: 1px solid #333; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <h1 style="color: #1DB954;">Spotify Porter</h1>
-    <p>Using Secure Text Format for reliability.</p>
+    <p>Reliable Playlist & Liked Songs Transfer</p>
     
     <div id="login-section">
-        <button class="btn" onclick="redirectToSpotify()">Login to Spotify</button>
+        <button class="btn" onclick="redirectToSpotify()">Login with Spotify</button>
     </div>
 
     <div id="action-section" style="display:none;">
-        <button class="btn" onclick="exportData()">1. Download Backup (.txt)</button>
+        <button class="btn" onclick="exportData()">1. Download Backup (.json)</button>
         <br>
-        <input type="file" id="importFile" accept=".txt" style="display:none" onchange="importData(event)">
-        <button class="btn" style="background:#444" onclick="document.getElementById('importFile').click()">2. Upload & Import (.txt)</button>
+        <input type="file" id="fileSelector" accept=".json" style="display:none" onchange="handleFileSelect(event)">
+        <button class="btn" style="background:#333" onclick="document.getElementById('fileSelector').click()">2. Upload & Import Now</button>
     </div>
 
-    <div id="status">Status: Waiting for login...</div>
+    <div id="status">Status: Waiting for authentication...</div>
 </div>
 
 <script>
-    const clientId = '10894b5f6e264203ac55e860682458a4'; // Replace with your actual Client ID
+    const clientId = '10894b5f6e264203ac55e860682458a4'; // নিশ্চিত করুন এখানে আপনার সঠিক ID আছে
     const redirectUri = window.location.origin + window.location.pathname;
 
+    // --- AUTHENTICATION ---
     async function redirectToSpotify() {
         const verifier = generateRandomString(64);
         window.localStorage.setItem('code_verifier', verifier);
@@ -58,26 +60,28 @@
         return await res.json();
     }
 
-    // --- NEW EXPORT AS BASE64 TEXT ---
+    // --- EXPORT FUNCTION ---
     async function exportData() {
         try {
-            updateStatus("Exporting... Please wait.");
+            updateStatus("Exporting library... please wait.");
             const token = window.localStorage.getItem('access_token');
             let backup = [];
 
-            // Fetch Liked Songs
-            let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
-            while(url) {
-                const res = await fetch(url, { headers: {'Authorization': `Bearer ${token}`} });
-                const data = await res.json();
-                backup.push({ name: "Liked Songs", tracks: data.items.map(i => i.track.uri), type: 'liked' });
-                url = data.next;
+            // Liked Songs
+            let likedUrl = 'https://api.spotify.com/v1/me/tracks?limit=50';
+            let likedTracks = [];
+            while(likedUrl) {
+                const res = await fetch(likedUrl, { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
+                likedTracks.push(...res.items.map(i => i.track.uri));
+                likedUrl = res.next;
+                updateStatus(`Found ${likedTracks.length} Liked Songs`);
             }
+            if(likedTracks.length > 0) backup.push({ name: "Liked Songs", tracks: likedTracks, isLiked: true });
 
-            // Fetch Playlists
-            const plRes = await fetch('https://api.spotify.com/v1/me/playlists', { headers: {'Authorization': `Bearer ${token}`} });
-            const plData = await plRes.json();
-            for (let pl of plData.items) {
+            // Playlists
+            const plRes = await fetch('https://api.spotify.com/v1/me/playlists', { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
+            for (let pl of plRes.items) {
+                updateStatus(`Backing up: ${pl.name}`);
                 let tUrl = pl.tracks.href;
                 let tracks = [];
                 while(tUrl) {
@@ -85,36 +89,42 @@
                     tracks.push(...tData.items.filter(i => i.track).map(i => i.track.uri));
                     tUrl = tData.next;
                 }
-                backup.push({ name: pl.name, tracks: tracks, type: 'playlist' });
+                backup.push({ name: pl.name, tracks: tracks, isLiked: false });
             }
 
-            // Convert to Base64 to prevent JSON errors
-            const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(backup))));
-            const blob = new Blob([encodedData], {type: 'text/plain'});
+            const blob = new Blob([JSON.stringify(backup, null, 2)], {type: 'application/json'});
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `Spotify_Porter_Backup.txt`;
+            a.download = `Spotify_Backup_Ready.json`;
             a.click();
-            updateStatus("Backup Complete! .txt file downloaded.");
+            updateStatus("Export Complete! File downloaded.");
         } catch (e) { updateStatus("Export Error: " + e.message); }
     }
 
-    // --- NEW IMPORT FROM TEXT ---
-    async function importData(event) {
+    // --- FIXED IMPORT LOGIC ---
+    async function handleFileSelect(event) {
         const file = event.target.files[0];
         if (!file) return;
+        
         const reader = new FileReader();
+        reader.readAsText(file);
+        
         reader.onload = async (e) => {
             try {
-                updateStatus("Processing file...");
-                const decodedData = decodeURIComponent(escape(atob(e.target.result)));
-                const data = JSON.parse(decodedData);
+                const content = e.target.result;
+                const data = JSON.parse(content);
                 const token = window.localStorage.getItem('access_token');
+                
+                if(!Array.isArray(data)) throw new Error("File format is not a valid list.");
+                
+                alert("File loaded successfully! Starting import...");
+                updateStatus("Import starting...");
+
                 const me = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
 
                 for (let item of data) {
-                    if (item.type === 'liked') {
-                        updateStatus("Restoring Liked Songs...");
+                    if (item.isLiked) {
+                        updateStatus("Importing Liked Songs...");
                         for (let i = 0; i < item.tracks.length; i += 50) {
                             const ids = item.tracks.slice(i, i+50).map(u => u.split(':')[2]);
                             await fetch(`https://api.spotify.com/v1/me/tracks?ids=${ids.join(',')}`, {
@@ -122,37 +132,47 @@
                             });
                         }
                     } else {
-                        updateStatus(`Restoring Playlist: ${item.name}`);
+                        updateStatus(`Creating Playlist: ${item.name}`);
                         const newPl = await fetch(`https://api.spotify.com/v1/users/${me.id}/playlists`, {
                             method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
                             body: JSON.stringify({ name: item.name })
                         }).then(r => r.json());
 
-                        for (let i = 0; i < item.tracks.length; i += 100) {
-                            await fetch(`https://api.spotify.com/v1/playlists/${newPl.id}/tracks`, {
-                                method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
-                                body: JSON.stringify({ uris: item.tracks.slice(i, i+100) })
-                            });
+                        if(newPl.id) {
+                            for (let i = 0; i < item.tracks.length; i += 100) {
+                                await fetch(`https://api.spotify.com/v1/playlists/${newPl.id}/tracks`, {
+                                    method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
+                                    body: JSON.stringify({ uris: item.tracks.slice(i, i+100) })
+                                });
+                            }
                         }
                     }
+                    await new Promise(r => setTimeout(r, 700)); // Delay to avoid Spotify blocking
                 }
-                updateStatus("SUCCESS: All Data Restored!");
-            } catch (err) { updateStatus("Import Error: Invalid file format."); }
+                updateStatus("SUCCESS: Import Finished!");
+                alert("Import Complete!");
+            } catch (err) {
+                alert("Import Failed: " + err.message);
+                updateStatus("Error: " + err.message);
+            }
         };
-        reader.readAsText(file);
     }
 
     function updateStatus(msg) { document.getElementById('status').innerText = msg; }
+    
     const code = new URLSearchParams(window.location.search).get('code');
     if (code) {
         getToken(code).then(d => {
-            window.localStorage.setItem('access_token', d.access_token);
-            window.history.replaceState({}, '', window.location.pathname);
-            document.getElementById('login-section').style.display = 'none';
-            document.getElementById('action-section').style.display = 'block';
-            updateStatus("Connected!");
+            if(d.access_token) {
+                window.localStorage.setItem('access_token', d.access_token);
+                window.history.replaceState({}, '', window.location.pathname);
+                document.getElementById('login-section').style.display = 'none';
+                document.getElementById('action-section').style.display = 'block';
+                updateStatus("Connected! Ready to Export or Import.");
+            }
         });
     }
+
     function generateRandomString(l) { return Array.from(crypto.getRandomValues(new Uint8Array(l))).map(x => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'[x % 62]).join(''); }
     async function generateCodeChallenge(v) {
         const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));

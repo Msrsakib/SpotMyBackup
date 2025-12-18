@@ -3,34 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Porter - Final Debug Build</title>
+    <title>Spotify Porter - Smooth Import</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
         .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 90%; max-width: 500px; }
-        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; margin: 10px; width: 85%; transition: 0.3s; }
-        #status { margin-top: 20px; color: #b3b3b3; font-size: 14px; background: #222; padding: 15px; border-radius: 10px; white-space: pre-wrap; }
+        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; margin: 10px; width: 85%; }
+        #status { margin-top: 20px; color: #b3b3b3; font-size: 14px; background: #222; padding: 15px; border-radius: 10px; text-align: left; line-height: 1.6; }
+        .progress-container { width: 100%; background: #333; height: 8px; border-radius: 4px; margin-top: 10px; overflow: hidden; }
+        .progress-bar { width: 0%; height: 100%; background: #1DB954; transition: width 0.3s; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <h1 style="color: #1DB954;">Spotify Porter</h1>
+    <p>Controlled Import (Anti-Block Edition)</p>
+    
     <div id="login-section">
-        <button class="btn" onclick="redirectToSpotify()">Connect Spotify</button>
+        <button class="btn" onclick="redirectToSpotify()">Login to Spotify</button>
     </div>
+
     <div id="action-section" style="display:none;">
-        <button class="btn" onclick="exportData()">1. Download Backup</button>
+        <button class="btn" onclick="exportData()">Export My Library</button>
         <br>
-        <input type="file" id="fileIn" accept=".json" style="display:none" onchange="importData(event)">
-        <button class="btn" style="background:#333" onclick="document.getElementById('fileIn').click()">2. Upload & Import</button>
+        <input type="file" id="importFile" accept=".json" style="display:none" onchange="startImport(event)">
+        <button class="btn" style="background:#444" onclick="document.getElementById('importFile').click()">Import Backup File</button>
     </div>
-    <div id="status">Status: Ready</div>
+
+    <div id="status">
+        <div id="status-text">Ready to connect...</div>
+        <div class="progress-container"><div id="progress-bar" class="progress-bar"></div></div>
+    </div>
 </div>
 
 <script>
-    const clientId = '10894b5f6e264203ac55e860682458a4'; 
+    const clientId = '10894b5f6e264203ac55e860682458a4'; // Replace with your ID
     const redirectUri = window.location.origin + window.location.pathname;
+    let token = "";
 
+    // --- AUTH (PKCE) ---
     async function redirectToSpotify() {
         const verifier = generateRandomString(64);
         window.localStorage.setItem('code_verifier', verifier);
@@ -51,98 +62,93 @@
         const res = await fetch('https://accounts.spotify.com/api/token', {
             method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params
         });
-        return await res.json();
+        const data = await res.json();
+        return data.access_token;
     }
 
-    async function importData(event) {
+    // --- CONTROLLED IMPORT ---
+    async function startImport(event) {
         const file = event.target.files[0];
         if (!file) return;
 
         const reader = new FileReader();
         reader.onload = async (e) => {
             try {
-                const rawContent = e.target.result;
-                // চেক করা হচ্ছে ফাইলটি খালি কি না বা ভুল ফরম্যাট কি না
-                if (!rawContent.trim().startsWith('{') && !rawContent.trim().startsWith('[')) {
-                    throw new Error("The file is not a valid JSON. It looks like an error page was saved instead.");
-                }
+                const data = JSON.parse(e.target.result);
+                updateStatus("File loaded. Getting user info...");
+                
+                const me = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
 
-                const data = JSON.parse(rawContent);
-                const token = window.localStorage.getItem('access_token');
-                updateStatus("File loaded. Verifying account...");
-
-                const meRes = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': `Bearer ${token}`} });
-                const me = await meRes.json();
-
-                if (!me.id) throw new Error("Could not verify Spotify account. Please login again.");
-
-                // Restore Liked Songs
+                // 1. Liked Songs (Saved Tracks)
                 if (data.saved && data.saved.length > 0) {
                     updateStatus(`Importing ${data.saved.length} Liked Songs...`);
                     for (let i = 0; i < data.saved.length; i += 50) {
-                        const ids = data.saved.slice(i, i+50).map(t => t.id).filter(id => id).join(',');
-                        if(ids) {
-                            await fetch(`https://api.spotify.com/v1/me/tracks?ids=${ids}`, {
-                                method: 'PUT', headers: {'Authorization': `Bearer ${token}`}
-                            });
-                        }
+                        const batch = data.saved.slice(i, i + 50).map(t => t.id).join(',');
+                        await fetch(`https://api.spotify.com/v1/me/tracks?ids=${batch}`, {
+                            method: 'PUT', headers: {'Authorization': `Bearer ${token}`}
+                        });
+                        updateProgress(i, data.saved.length);
+                        await new Promise(r => setTimeout(r, 800)); // গানগুলোর মাঝে ০.৮ সেকেন্ড বিরতি
                     }
                 }
 
-                // Restore Playlists
+                // 2. Playlists
                 const playlistNames = Object.keys(data.playlists || {});
                 for (let name of playlistNames) {
                     updateStatus(`Creating Playlist: ${name}`);
                     const newPl = await fetch(`https://api.spotify.com/v1/users/${me.id}/playlists`, {
-                        method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
-                        body: JSON.stringify({ name: name, public: true })
+                        method: 'POST',
+                        headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
+                        body: JSON.stringify({ name: name })
                     }).then(r => r.json());
 
                     const tracks = data.playlists[name].tracks;
-                    if (newPl.id && tracks && tracks.length > 0) {
-                        for (let i = 0; i < tracks.length; i += 100) {
-                            const uris = tracks.slice(i, i+100).map(t => t.uri).filter(u => u);
+                    if (newPl.id && tracks.length > 0) {
+                        for (let j = 0; j < tracks.length; j += 100) {
+                            const uris = tracks.slice(j, j + 100).map(t => t.uri);
                             await fetch(`https://api.spotify.com/v1/playlists/${newPl.id}/tracks`, {
-                                method: 'POST', headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
+                                method: 'POST',
+                                headers: {'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json'},
                                 body: JSON.stringify({ uris: uris })
                             });
+                            updateStatus(`Adding songs to ${name}... (${j + uris.length}/${tracks.length})`);
+                            await new Promise(r => setTimeout(r, 1000)); // প্রতি ১০০ গানের পর ১ সেকেন্ড বিরতি
                         }
                     }
-                    await new Promise(r => setTimeout(r, 600)); 
                 }
-                updateStatus("SUCCESS! Your library has been restored.");
-                alert("Import Finished!");
+                updateStatus("SUCCESS: Everything imported!");
+                alert("Import Complete!");
             } catch (err) {
-                console.error(err);
-                updateStatus("Import Error: " + err.message);
-                alert("Failed: " + err.message);
+                updateStatus("Error: " + err.message);
             }
         };
         reader.readAsText(file);
     }
 
+    // --- EXPORT (SPOTMYBACKUP FORMAT) ---
     async function exportData() {
         try {
-            updateStatus("Starting Full Export...");
-            const token = window.localStorage.getItem('access_token');
+            updateStatus("Exporting... this may take a while.");
             let collections = { saved: [], playlists: {} };
-
+            
+            // Liked Songs
             let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
             while(url) {
                 const res = await fetch(url, { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
-                if(res.items) res.items.forEach(i => collections.saved.push({ id: i.track.id, uri: i.track.uri }));
+                res.items.forEach(i => collections.saved.push({ id: i.track.id, uri: i.track.uri }));
                 url = res.next;
                 updateStatus(`Fetched ${collections.saved.length} Liked Songs`);
             }
 
+            // Playlists
             const plRes = await fetch('https://api.spotify.com/v1/me/playlists', { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
             for (let pl of plRes.items) {
-                updateStatus(`Backing up: ${pl.name}`);
+                updateStatus(`Reading: ${pl.name}`);
                 let tracks = [];
                 let tUrl = pl.tracks.href;
                 while(tUrl) {
                     const tData = await fetch(tUrl, { headers: {'Authorization': `Bearer ${token}`} }).then(r => r.json());
-                    if(tData.items) tData.items.forEach(i => { if(i.track) tracks.push({ id: i.track.id, uri: i.track.uri }); });
+                    tData.items.forEach(i => { if(i.track) tracks.push({ id: i.track.id, uri: i.track.uri }); });
                     tUrl = tData.next;
                 }
                 collections.playlists[pl.name] = { name: pl.name, id: pl.id, tracks: tracks };
@@ -151,25 +157,27 @@
             const blob = new Blob([JSON.stringify(collections)], {type: 'application/json'});
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `Spotify_Backup_Final.json`;
+            a.download = `Spotify_Backup.json`;
             a.click();
             updateStatus("Export Complete!");
-        } catch (e) { updateStatus("Export Error: " + e.message); }
+        } catch (e) { updateStatus("Error: " + e.message); }
     }
 
-    function updateStatus(msg) { document.getElementById('status').innerText = "Status: " + msg; }
+    function updateStatus(msg) { document.getElementById('status-text').innerText = msg; }
+    function updateProgress(c, t) { document.getElementById('progress-bar').style.width = (c/t)*100 + '%'; }
+
     const code = new URLSearchParams(window.location.search).get('code');
     if (code) {
-        getToken(code).then(d => {
-            if(d.access_token) {
-                window.localStorage.setItem('access_token', d.access_token);
-                window.history.replaceState({}, '', window.location.pathname);
-                document.getElementById('login-section').style.display = 'none';
-                document.getElementById('action-section').style.display = 'block';
-                updateStatus("Connected!");
-            }
+        getToken(code).then(t => {
+            token = t;
+            window.localStorage.setItem('access_token', t);
+            window.history.replaceState({}, '', window.location.pathname);
+            document.getElementById('login-section').style.display = 'none';
+            document.getElementById('action-section').style.display = 'block';
+            updateStatus("Connected!");
         });
     }
+
     function generateRandomString(l) { return Array.from(crypto.getRandomValues(new Uint8Array(l))).map(x => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'[x % 62]).join(''); }
     async function generateCodeChallenge(v) {
         const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));

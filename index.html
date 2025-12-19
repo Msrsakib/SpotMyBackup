@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Porter - High Speed Edition</title>
+    <title>Spotify Porter - High Speed Fix</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; text-align: center; padding: 50px; }
         .card { background: #181818; padding: 40px; border-radius: 20px; display: inline-block; width: 90%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #333; }
-        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; width: 100%; margin: 10px 0; font-size: 16px; transition: 0.2s; }
-        .btn:hover { background: #1ed760; transform: scale(1.02); }
+        .btn { background: #1DB954; color: white; padding: 15px 30px; border: none; border-radius: 30px; cursor: pointer; font-weight: bold; width: 100%; margin: 10px 0; font-size: 16px; }
         #status { margin-top: 20px; color: #b3b3b3; font-size: 14px; background: #222; padding: 15px; border-radius: 10px; min-height: 60px; text-align: left; }
         .progress-container { width: 100%; background: #444; height: 8px; border-radius: 4px; margin-top: 10px; overflow: hidden; }
         .progress-bar { width: 0%; height: 100%; background: #1DB954; transition: 0.2s; }
@@ -18,7 +17,7 @@
 
 <div class="card">
     <h1 style="color: #1DB954;">Spotify Porter</h1>
-    <p style="color: #888;">Fast & Duplicate-Proof Restore</p>
+    <p style="color: #888;">Stable & Fast Restore</p>
     
     <div id="login-section">
         <button class="btn" onclick="startLogin()">Connect with Spotify</button>
@@ -28,7 +27,7 @@
         <button class="btn" onclick="exportData()">1. Download Backup</button>
         <br>
         <input type="file" id="fileInput" accept=".json" style="display:none" onchange="importData(event)">
-        <button class="btn" style="background:#333" onclick="document.getElementById('fileInput').click()">2. Start High-Speed Import</button>
+        <button class="btn" style="background:#333" onclick="document.getElementById('fileInput').click()">2. Start Import Now</button>
     </div>
 
     <div id="status">
@@ -38,6 +37,7 @@
 </div>
 
 <script>
+    // আপনার অরিজিনাল Client ID এখানে দিন
     const clientId = '10894b5f6e264203ac55e860682458a4'; 
     const redirectUri = window.location.origin + window.location.pathname;
     let accessToken = '';
@@ -67,32 +67,33 @@
         return await res.json();
     }
 
-    // ৩. এক্সপোর্ট (Backup)
+    // ৩. এক্সপোর্ট (Robust)
     async function exportData() {
         try {
             updateStatus("Exporting library...");
             let collections = { saved: [], playlists: {} };
 
-            // Liked Songs
             let url = 'https://api.spotify.com/v1/me/tracks?limit=50';
             while(url) {
                 const res = await fetch(url, { headers: {'Authorization': 'Bearer ' + accessToken} }).then(r => r.json());
-                res.items.forEach(i => collections.saved.push({ id: i.track.id, uri: i.track.uri }));
+                if (res.items) res.items.forEach(i => collections.saved.push({ id: i.track.id, uri: i.track.uri }));
                 url = res.next;
                 updateStatus(`Fetched ${collections.saved.length} songs...`);
             }
 
-            // Playlists
             const plRes = await fetch('https://api.spotify.com/v1/me/playlists?limit=50', { headers: {'Authorization': 'Bearer ' + accessToken} }).then(r => r.json());
-            for (let pl of plRes.items) {
-                let tracks = [];
-                let tUrl = pl.tracks.href;
-                while(tUrl) {
-                    const tData = await fetch(tUrl, { headers: {'Authorization': 'Bearer ' + accessToken} }).then(r => r.json());
-                    tData.items.forEach(i => { if(i.track) tracks.push({ id: i.track.id, uri: i.track.uri }); });
-                    tUrl = tData.next;
+            if (plRes.items) {
+                for (let pl of plRes.items) {
+                    updateStatus(`Reading: ${pl.name}`);
+                    let tracks = [];
+                    let tUrl = pl.tracks.href;
+                    while(tUrl) {
+                        const tData = await fetch(tUrl, { headers: {'Authorization': 'Bearer ' + accessToken} }).then(r => r.json());
+                        if (tData.items) tData.items.forEach(i => { if(i.track) tracks.push({ id: i.track.id, uri: i.track.uri }); });
+                        tUrl = tData.next;
+                    }
+                    collections.playlists[pl.name] = { name: pl.name, tracks: tracks };
                 }
-                collections.playlists[pl.name] = { name: pl.name, tracks: tracks };
             }
 
             const blob = new Blob([JSON.stringify(collections)], {type: 'application/json'});
@@ -101,10 +102,10 @@
             a.download = `Spotify_Backup.json`;
             a.click();
             updateStatus("Export Complete!");
-        } catch (e) { updateStatus("Error: " + e.message); }
+        } catch (e) { updateStatus("Export Error: " + e.message); }
     }
 
-    // ৪. হাই-স্পিড ইমপোর্ট (Optimized)
+    // ৪. ইমপোর্ট (এরর-প্রুফ লজিক)
     async function importData(event) {
         const file = event.target.files[0];
         if (!file) return;
@@ -113,63 +114,60 @@
         reader.onload = async (e) => {
             try {
                 const data = JSON.parse(e.target.result);
-                updateStatus("Scanning playlists quickly...");
+                updateStatus("Checking playlists...");
                 
                 let existingPlaylists = {};
-                let plUrl = 'https://api.spotify.com/v1/me/playlists?limit=50?limit=50';
+                let plUrl = 'https://api.spotify.com/v1/me/playlists?limit=50';
                 while(plUrl) {
                     const plRes = await fetch(plUrl, { headers: {'Authorization': 'Bearer ' + accessToken} }).then(r => r.json());
-                    plRes.items.forEach(p => { existingPlaylists[p.name] = p.id; });
+                    if (plRes.items) plRes.items.forEach(p => { existingPlaylists[p.name] = p.id; });
                     plUrl = plRes.next;
                 }
 
-                // A. Liked Songs (Faster batching)
-                if (data.saved) {
-                    updateStatus(`Restoring ${data.saved.length} Liked Songs...`);
+                if (data.saved && data.saved.length > 0) {
+                    updateStatus(`Restoring Liked Songs...`);
                     for (let i = 0; i < data.saved.length; i += 50) {
                         const ids = data.saved.slice(i, i+50).map(t => t.id).join(',');
                         await fetch('https://api.spotify.com/v1/me/tracks?ids=' + ids, {
                             method: 'PUT', headers: {'Authorization': 'Bearer ' + accessToken}
                         });
                         updateProgress(i, data.saved.length);
-                        await new Promise(r => setTimeout(r, 300)); // ৩৫০ মিলিসেকেন্ড বিরতি (আগে ৮০০ ছিল)
+                        await new Promise(r => setTimeout(r, 400));
                     }
                 }
 
-                // B. Playlists (High-Speed Merge)
                 const me = await fetch('https://api.spotify.com/v1/me', { headers: {'Authorization': 'Bearer ' + accessToken} }).then(r => r.json());
                 
-                for (let name in data.playlists) {
-                    let playlistId = existingPlaylists[name];
-
-                    if (!playlistId) {
-                        updateStatus(`Creating: ${name}`);
-                        const newPl = await fetch(`https://api.spotify.com/v1/users/${me.id}/playlists`, {
-                            method: 'POST',
-                            headers: {'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json'},
-                            body: JSON.stringify({ name: name })
-                        }).then(r => r.json());
-                        playlistId = newPl.id;
-                    } else {
-                        updateStatus(`Merging into: ${name}`);
-                    }
-
-                    const tracks = data.playlists[name].tracks;
-                    if (playlistId && tracks.length > 0) {
-                        for (let j = 0; j < tracks.length; j += 100) {
-                            const uris = tracks.slice(j, j+100).map(t => t.uri);
-                            await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+                if (data.playlists) {
+                    for (let name in data.playlists) {
+                        let playlistId = existingPlaylists[name];
+                        if (!playlistId) {
+                            updateStatus(`Creating: ${name}`);
+                            const newPl = await fetch(`https://api.spotify.com/v1/users/${me.id}/playlists`, {
                                 method: 'POST',
                                 headers: {'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json'},
-                                body: JSON.stringify({ uris: uris })
-                            });
-                            await new Promise(r => setTimeout(r, 500)); // ৫০০ মিলিসেকেন্ড বিরতি (আগে ১ সেকেন্ড ছিল)
+                                body: JSON.stringify({ name: name })
+                            }).then(r => r.json());
+                            playlistId = newPl.id;
+                        }
+
+                        const tracks = data.playlists[name].tracks || [];
+                        if (playlistId && tracks.length > 0) {
+                            for (let j = 0; j < tracks.length; j += 100) {
+                                const uris = tracks.slice(j, j+100).map(t => t.uri);
+                                await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks`, {
+                                    method: 'POST',
+                                    headers: {'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json'},
+                                    body: JSON.stringify({ uris: uris })
+                                });
+                                await new Promise(r => setTimeout(r, 600));
+                            }
                         }
                     }
                 }
-                updateStatus("SUCCESS: High-speed restoration finished!");
-                alert("Restoration Done!");
-            } catch (err) { alert("Import Error: " + err.message); }
+                updateStatus("SUCCESS!");
+                alert("Restoration Finished!");
+            } catch (err) { updateStatus("Import Error: " + err.message); }
         };
         reader.readAsText(file);
     }
@@ -185,7 +183,7 @@
                 window.history.replaceState({}, '', window.location.pathname);
                 document.getElementById('login-section').style.display = 'none';
                 document.getElementById('action-section').style.display = 'block';
-                updateStatus("Connected! High-speed ready.");
+                updateStatus("Connected!");
             }
         });
     }
